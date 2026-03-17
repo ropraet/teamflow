@@ -1,13 +1,16 @@
 """
 Bug Registry — central feature flag system for injecting controlled bugs.
 Each bug has an ID, metadata, and an active/inactive state.
+State is persisted to disk so it survives restarts.
 """
 from __future__ import annotations
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 GROUND_TRUTH_PATH = Path(__file__).parent.parent / "bugs" / "ground_truth.json"
+STATE_PATH = Path(os.getenv("DB_PATH", "teamflow.db")).parent / "bug_state.json"
 
 PRESETS: dict[str, list[str]] = {
     "none": [],
@@ -46,8 +49,8 @@ class BugRegistry:
         self._active: set[str] = set()
         self._catalog: dict[str, dict[str, Any]] = {}
         self._load_ground_truth()
-        # hard preset = all bugs
         PRESETS["hard"] = list(self._catalog.keys())
+        self._load_state()
 
     def _load_ground_truth(self) -> None:
         if GROUND_TRUTH_PATH.exists():
@@ -56,25 +59,43 @@ class BugRegistry:
         else:
             self._catalog = {}
 
+    def _load_state(self) -> None:
+        if STATE_PATH.exists():
+            try:
+                data = json.loads(STATE_PATH.read_text())
+                self._active = set(data.get("active", []))
+            except (json.JSONDecodeError, KeyError):
+                self._active = set()
+
+    def _save_state(self) -> None:
+        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        STATE_PATH.write_text(json.dumps({"active": sorted(self._active)}))
+
     def is_active(self, bug_id: str) -> bool:
         return bug_id in self._active
 
     def activate(self, bug_id: str) -> None:
         self._active.add(bug_id)
+        self._save_state()
 
     def deactivate(self, bug_id: str) -> None:
         self._active.discard(bug_id)
+        self._save_state()
 
     def toggle(self, bug_id: str) -> bool:
         if bug_id in self._active:
             self._active.discard(bug_id)
-            return False
-        self._active.add(bug_id)
-        return True
+            active = False
+        else:
+            self._active.add(bug_id)
+            active = True
+        self._save_state()
+        return active
 
     def apply_preset(self, preset_name: str) -> list[str]:
         bugs = PRESETS.get(preset_name, [])
         self._active = set(bugs)
+        self._save_state()
         return bugs
 
     def list_bugs(self) -> list[dict[str, Any]]:
