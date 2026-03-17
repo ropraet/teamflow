@@ -1,0 +1,13 @@
+services:
+  teamflow:
+    build: .
+    ports:
+      - "3000:8000"
+    environment:
+      - SECRET_KEY=teamflow-secret-key-change-in-prod
+      - DB_PATH=/app/data/teamflow.db
+    volumes:
+      - teamflow-data:/app/data
+
+volumes:
+  teamflow-data:
